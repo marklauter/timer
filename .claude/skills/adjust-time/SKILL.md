@@ -1,6 +1,7 @@
 ---
 name: adjust-time
 description: Add a correction entry (± minutes with a reason) to the time ledger.
+argument-hint: <±minutes> "reason" [owner/repo]
 disable-model-invocation: true
 allowed-tools: Bash(/d/projects/timer/timer/t:*), Bash(git remote get-url origin)
 ---
