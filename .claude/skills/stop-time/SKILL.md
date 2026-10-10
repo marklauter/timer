@@ -1,6 +1,7 @@
 ---
 name: stop-time
 description: Stop the running time tracker.
+argument-hint: '"description"'
 disable-model-invocation: true
 allowed-tools: Bash(/d/projects/timer/timer/t:*)
 ---

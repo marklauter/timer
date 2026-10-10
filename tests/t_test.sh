@@ -44,7 +44,7 @@ test_start_takes_project_from_https_origin() {
 
 test_start_takes_project_from_ssh_origin() {
     git init -q repo && git -C repo remote add origin git@github.com:marklauter/kingo.git
-    run bash -c "cd repo && '$T' start working on parser"
+    run bash -c "cd repo && '$T' start 'working on parser'"
     assert_success
     assert_stdout_eq "started marklauter-kingo"
     assert_equal '"working on parser"' "$(last_row marklauter-kingo | cut -d, -f4-)"
@@ -69,7 +69,7 @@ test_start_stops_the_running_project() {
 # ---- descriptions ----
 
 test_start_and_stop_record_descriptions() {
-    "$T" start a/b fixing auth bug >/dev/null
+    "$T" start a/b "fixing auth bug" >/dev/null
     "$T" stop "done, merged" >/dev/null
     run tail -n 2 a-b.csv
     assert_stdout_contains ',start,,"fixing auth bug"'
@@ -97,6 +97,21 @@ test_description_over_2000_chars_is_rejected_and_not_logged() {
     assert_failure
     assert_stderr_contains "limit is 2000"
     [[ ! -e a-b.csv ]] || fail "logged a rejected description"
+}
+
+test_start_rejects_unquoted_description() {
+    run "$T" start a/b fixing auth bug
+    assert_failure
+    assert_stderr_contains "quote descriptions"
+    [[ ! -e a-b.csv ]] || fail "logged an unquoted description"
+}
+
+test_stop_rejects_unquoted_description() {
+    "$T" start a/b >/dev/null
+    run "$T" stop done and merged
+    assert_failure
+    assert_stderr_contains "quote descriptions"
+    assert_equal start "$(last_row a-b | cut -d, -f2)"
 }
 
 # ---- stop / status ----
@@ -141,6 +156,13 @@ test_adjust_with_non_numeric_minutes_fails() {
     assert_failure
     assert_stderr_contains "usage: t adjust"
     [[ ! -e a-b.csv ]] || fail "logged an invalid adjust"
+}
+
+test_adjust_rejects_unquoted_reason() {
+    run "$T" adjust -30 double counted
+    assert_failure
+    assert_stderr_contains "quote descriptions"
+    [[ ! -e counted.csv ]] || fail "treated a reason word as the project"
 }
 
 # ---- report ----
