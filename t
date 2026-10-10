@@ -30,6 +30,10 @@ log() { # name event [minutes] [note]
   echo "$(date -Iseconds),$2,${3:-},$note" >> "$file"
 }
 
+repo_re='^[^/[:space:]]+/[^/[:space:]]+$'
+
+usage() { echo "usage: $1" >&2; echo 'quote descriptions: "like this"' >&2; exit 1; }
+
 is_running() { [[ "$(tail -n 1 "$1" | cut -d, -f2)" == start ]]; }
 
 running() { # prints names whose last event is start
@@ -58,17 +62,19 @@ case "${1:-status}" in
   start)
     shift
     p=
-    if [[ "${1:-}" =~ ^[^/[:space:]]+/[^/[:space:]]+$ ]]; then p="$1"; shift; fi
+    if [[ "${1:-}" =~ $repo_re ]]; then p="$1"; shift; fi
+    (( $# <= 1 )) || usage 't start [owner/repo] ["description"]'
     name="$(project "$p")"
     for n in $(running); do log "$n" stop; echo "stopped $n"; done
-    log "$name" start "" "$*"
+    log "$name" start "" "${1:-}"
     echo "started $name"
     ;;
   stop)
+    shift
+    (( $# <= 1 )) || usage 't stop ["description"]'
     names="$(running)"
     [[ -n "$names" ]] || echo "no timer running"
-    shift
-    for n in $names; do log "$n" stop "" "$*"; echo "stopped $n"; done
+    for n in $names; do log "$n" stop "" "${1:-}"; echo "stopped $n"; done
     ;;
   status)
     names="$(running)"
@@ -79,7 +85,7 @@ case "${1:-status}" in
     done
     ;;
   adjust)
-    [[ "${2:-}" =~ ^[+-]?[0-9]+(\.[0-9]+)?$ && -n "${3:-}" ]] || { echo 'usage: t adjust <±minutes> "reason" [owner/repo]' >&2; exit 1; }
+    [[ "${2:-}" =~ ^[+-]?[0-9]+(\.[0-9]+)?$ && -n "${3:-}" && $# -le 4 ]] && [[ -z "${4:-}" || "$4" =~ $repo_re ]] || usage 't adjust <±minutes> "reason" [owner/repo]'
     name="$(project "${4:-}")"
     log "$name" adjust "${2#+}" "$3"
     echo "adjusted $name by $2 min"
