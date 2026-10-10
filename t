@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Time tracker. Append-only ledger per project: <owner>-<repo>.csv next to this script.
+# Time tracker. Append-only ledger per project: ledger/<owner>-<repo>.csv next to this script.
 #   t start [owner/repo] ["description"]  start timer (defaults to current git repo's origin)
 #   t stop ["description"]                stop the running timer
 #   t status                              show the running timer
@@ -9,6 +9,7 @@
 set -euo pipefail
 
 dir="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+ledger="$dir/ledger"
 
 project() {
   local p="${1:-}"
@@ -22,9 +23,10 @@ project() {
 }
 
 log() { # name event [minutes] [note]
-  local file="$dir/$1.csv" note="${4:-}"
+  local file="$ledger/$1.csv" note="${4:-}"
   note="${note//[$'\r\n']/ }"
   (( ${#note} <= 2000 )) || { echo "description is ${#note} chars; limit is 2000" >&2; exit 1; }
+  mkdir -p "$ledger"
   [[ -f "$file" ]] || echo "timestamp,event,minutes,note" >> "$file"
   [[ -n "$note" ]] && note="\"${note//\"/\"\"}\""
   echo "$(date -Iseconds),$2,${3:-},$note" >> "$file"
@@ -38,7 +40,7 @@ is_running() { [[ "$(tail -n 1 "$1" | cut -d, -f2)" == start ]]; }
 
 running() { # prints names whose last event is start
   local f
-  for f in "$dir"/*.csv; do
+  for f in "$ledger"/*.csv; do
     [[ -f "$f" ]] && is_running "$f" && basename "$f" .csv
   done
   return 0
@@ -80,7 +82,7 @@ case "${1:-status}" in
     names="$(running)"
     [[ -n "$names" ]] || echo "no timer running"
     for n in $names; do
-      since="$(tail -n 1 "$dir/$n.csv" | cut -d, -f1)"
+      since="$(tail -n 1 "$ledger/$n.csv" | cut -d, -f1)"
       echo "$n running $(( ($(date +%s) - $(date -d "$since" +%s)) / 60 )) min"
     done
     ;;
@@ -92,7 +94,7 @@ case "${1:-status}" in
     ;;
   checkpoint)
     name="$(project "${2:-}")"
-    f="$dir/$name.csv"
+    f="$ledger/$name.csv"
     [[ -f "$f" ]] || { echo "no ledger for $name" >&2; exit 1; }
     if is_running "$f"; then echo "$name is running; stop it first" >&2; exit 1; fi
     m="$(balance "$f")"
@@ -100,7 +102,7 @@ case "${1:-status}" in
     echo "checkpoint $name at $m min"
     ;;
   report)
-    if [[ -n "${2:-}" ]]; then files=("$dir/$(project "$2").csv"); else files=("$dir"/*.csv); fi
+    if [[ -n "${2:-}" ]]; then files=("$ledger/$(project "$2").csv"); else files=("$ledger"/*.csv); fi
     for f in "${files[@]}"; do
       [[ -f "$f" ]] || continue
       printf "%-40s %8.2f h\n" "$(basename "$f" .csv)" "$(awk -v m="$(balance "$f")" 'BEGIN{print m/60}')"
