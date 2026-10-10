@@ -5,6 +5,8 @@
 SRC="$PROJECT_ROOT/t"
 
 setup() {
+    # git hooks export GIT_DIR etc.; clear them so test repos stay inside the tmpdir
+    unset GIT_DIR GIT_WORK_TREE GIT_INDEX_FILE GIT_COMMON_DIR GIT_PREFIX
     cp "$SRC" "$PWD/t"
     T="$PWD/t"
 }
