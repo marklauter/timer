@@ -12,10 +12,11 @@ setup() {
 # write a raw ledger file for report/checkpoint tests
 ledger() { # name, then rows
     local name="$1"; shift
-    { echo "timestamp,event,minutes,note"; printf '%s\n' "$@"; } > "$PWD/$name.csv"
+    mkdir -p ledger
+    { echo "timestamp,event,minutes,note"; printf '%s\n' "$@"; } > "$PWD/ledger/$name.csv"
 }
 
-last_row() { tail -n 1 "$PWD/$1.csv"; }
+last_row() { tail -n 1 "$PWD/ledger/$1.csv"; }
 
 # ---- start ----
 
@@ -23,7 +24,8 @@ test_start_with_project_creates_ledger_with_header() {
     run "$T" start marklauter/Kingo
     assert_success
     assert_stdout_eq "started marklauter-kingo"
-    assert_equal "timestamp,event,minutes,note" "$(head -n 1 marklauter-kingo.csv)"
+    assert_equal "timestamp,event,minutes,note" "$(head -n 1 ledger/marklauter-kingo.csv)"
+    [[ ! -e marklauter-kingo.csv ]] || fail "wrote the ledger next to the script"
     [[ "$(last_row marklauter-kingo)" =~ ^[0-9T:+-]+,start,,$ ]] || fail "bad start row: $(last_row marklauter-kingo)"
 }
 
@@ -31,8 +33,8 @@ test_header_written_only_once() {
     "$T" start a/b >/dev/null
     "$T" stop >/dev/null
     "$T" start a/b >/dev/null
-    assert_equal 1 "$(grep -c '^timestamp,' a-b.csv)"
-    assert_equal 4 "$(wc -l < a-b.csv | tr -d ' ')"
+    assert_equal 1 "$(grep -c '^timestamp,' ledger/a-b.csv)"
+    assert_equal 4 "$(wc -l < ledger/a-b.csv | tr -d ' ')"
 }
 
 test_start_takes_project_from_https_origin() {
@@ -54,7 +56,7 @@ test_start_outside_repo_without_project_fails() {
     run "$T" start
     assert_failure
     assert_stderr_contains "pass owner/repo"
-    [[ ! -e "-.csv" ]] || fail "wrote a ledger for an unknown project"
+    [[ ! -e ledger/-.csv ]] || fail "wrote a ledger for an unknown project"
 }
 
 test_start_stops_the_running_project() {
@@ -71,7 +73,7 @@ test_start_stops_the_running_project() {
 test_start_and_stop_record_descriptions() {
     "$T" start a/b "fixing auth bug" >/dev/null
     "$T" stop "done, merged" >/dev/null
-    run tail -n 2 a-b.csv
+    run tail -n 2 ledger/a-b.csv
     assert_stdout_contains ',start,,"fixing auth bug"'
     assert_stdout_contains ',stop,,"done, merged"'
 }
@@ -83,7 +85,7 @@ test_description_quotes_are_escaped() {
 
 test_description_newlines_are_flattened() {
     "$T" start a/b "$(printf 'line1\nline2')" >/dev/null
-    assert_equal 2 "$(wc -l < a-b.csv | tr -d ' ')"
+    assert_equal 2 "$(wc -l < ledger/a-b.csv | tr -d ' ')"
     assert_equal '"line1 line2"' "$(last_row a-b | cut -d, -f4-)"
 }
 
@@ -96,14 +98,14 @@ test_description_over_2000_chars_is_rejected_and_not_logged() {
     run "$T" start a/b "$(printf 'a%.0s' {1..2001})"
     assert_failure
     assert_stderr_contains "limit is 2000"
-    [[ ! -e a-b.csv ]] || fail "logged a rejected description"
+    [[ ! -e ledger/a-b.csv ]] || fail "logged a rejected description"
 }
 
 test_start_rejects_unquoted_description() {
     run "$T" start a/b fixing auth bug
     assert_failure
     assert_stderr_contains "quote descriptions"
-    [[ ! -e a-b.csv ]] || fail "logged an unquoted description"
+    [[ ! -e ledger/a-b.csv ]] || fail "logged an unquoted description"
 }
 
 test_stop_rejects_unquoted_description() {
@@ -140,7 +142,7 @@ test_status_shows_running_project() {
 test_adjust_records_signed_minutes_and_reason() {
     "$T" adjust +90 "forgot to start" a/b >/dev/null
     "$T" adjust -30 "double counted" a/b >/dev/null
-    run tail -n 2 a-b.csv
+    run tail -n 2 ledger/a-b.csv
     assert_stdout_contains ',adjust,90,"forgot to start"'
     assert_stdout_contains ',adjust,-30,"double counted"'
 }
@@ -155,14 +157,14 @@ test_adjust_with_non_numeric_minutes_fails() {
     run "$T" adjust 1h "reason" a/b
     assert_failure
     assert_stderr_contains "usage: t adjust"
-    [[ ! -e a-b.csv ]] || fail "logged an invalid adjust"
+    [[ ! -e ledger/a-b.csv ]] || fail "logged an invalid adjust"
 }
 
 test_adjust_rejects_unquoted_reason() {
     run "$T" adjust -30 double counted
     assert_failure
     assert_stderr_contains "quote descriptions"
-    [[ ! -e counted.csv ]] || fail "treated a reason word as the project"
+    [[ ! -e ledger/counted.csv ]] || fail "treated a reason word as the project"
 }
 
 # ---- report ----
