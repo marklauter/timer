@@ -1,7 +1,7 @@
 ---
 name: start-time
 description: Start the time tracker for the current project.
-argument-hint: [owner/repo] "description"
+argument-hint: '[owner/repo] "description"'
 disable-model-invocation: true
 allowed-tools: Bash(/d/projects/timer/timer/t:*), Bash(git remote get-url origin)
 ---
