@@ -1,0 +1,2 @@
+# ledgers are personal data; keep them out of the repo
+*.csv
