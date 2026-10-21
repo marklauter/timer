@@ -1,47 +1,75 @@
 #!/usr/bin/env bash
-# Time tracker. Append-only ledger per project: ledger/<owner>-<repo>.csv next to this script.
-#   t start [owner/repo] ["description"]  start timer (defaults to current git repo's origin)
-#   t stop ["description"]                stop the running timer
-#   t status                              show the running timer
-#   t adjust <±minutes> "reason" [owner/repo]   correction entry
-#   t checkpoint [owner/repo]             carry the balance forward (turn the page)
-#   t report [owner/repo]                 balance in hours per project (or one project)
+# Time tracker. Append-only ledger per client project: ledger/<client>/<project>.csv next to this script.
+#   t start <client> <project> ["description"] [--at time]  start timer
+#   t stop ["description"] [--at time]                      stop the running timer
+#   t status                                                show the running timer
+#   t adjust <client> <project> <±minutes> "reason"         correction entry
+#   t checkpoint <client> <project>                         carry the balance forward (turn the page)
+#   t report [client] [project]                             balance in hours per project
+#   --at takes anything `date -d` reads, such as 10:45 or "2026-10-21 10:45", and defaults to now
 set -euo pipefail
 
 dir="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 ledger="$dir/ledger"
 
-project() {
-  local p="${1:-}"
-  if [[ -z "$p" ]]; then
-    p="$(git remote get-url origin 2>/dev/null)" || { echo "not in a git repo with an origin; pass owner/repo" >&2; exit 1; }
-    p="${p%.git}"
-    p="${p#*://*/}"   # https://github.com/owner/repo -> owner/repo
-    p="${p#*:}"       # git@github.com:owner/repo     -> owner/repo
+usage() { echo "usage: $1" >&2; echo 'quote descriptions: "like this"' >&2; exit 1; }
+
+part() { # label value -> validated, lowercased; it becomes a folder or file name
+  [[ "${2:-}" =~ ^[A-Za-z0-9][A-Za-z0-9_.-]*$ ]] || { echo "pass a $1 name (letters, digits, . _ -)" >&2; exit 1; }
+  echo "$2" | tr '[:upper:]' '[:lower:]'
+}
+
+key() { # client project -> client/project
+  local c p
+  c="$(part client "${1:-}")" && p="$(part project "${2:-}")" && echo "$c/$p"
+}
+
+# pull --at out of the arguments; every entry this run writes carries that time
+at=
+args=()
+while (( $# )); do
+  if [[ "$1" == --at ]]; then
+    (( $# >= 2 )) || usage '--at <time>'
+    at="$2"; shift 2
+  else
+    args+=("$1"); shift
   fi
-  echo "${p//\//-}" | tr '[:upper:]' '[:lower:]'
+done
+set -- "${args[@]}"
+
+if [[ -n "$at" ]]; then
+  stamp="$(date -d "$at" -Iseconds 2>/dev/null)" || { echo "can't read time '$at'" >&2; exit 1; }
+  (( $(date -d "$stamp" +%s) <= $(date +%s) )) || { echo "$stamp is in the future" >&2; exit 1; }
+else
+  stamp="$(date -Iseconds)"
+fi
+
+not_before_last() { # name: refuse a time earlier than the ledger's last entry
+  local f="$ledger/$1.csv" last
+  [[ -f "$f" ]] || return 0
+  last="$(tail -n 1 "$f" | cut -d, -f1)"
+  [[ "$last" == timestamp ]] && return 0
+  (( $(date -d "$last" +%s) <= $(date -d "$stamp" +%s) )) || { echo "$1 has an entry at $last, after $stamp" >&2; exit 1; }
 }
 
 log() { # name event [minutes] [note]
   local file="$ledger/$1.csv" note="${4:-}"
   note="${note//[$'\r\n']/ }"
   (( ${#note} <= 2000 )) || { echo "description is ${#note} chars; limit is 2000" >&2; exit 1; }
-  mkdir -p "$ledger"
+  mkdir -p "$(dirname "$file")"
   [[ -f "$file" ]] || echo "timestamp,event,minutes,note" >> "$file"
   [[ -n "$note" ]] && note="\"${note//\"/\"\"}\""
-  echo "$(date -Iseconds),$2,${3:-},$note" >> "$file"
+  echo "$stamp,$2,${3:-},$note" >> "$file"
 }
-
-repo_re='^[^/[:space:]]+/[^/[:space:]]+$'
-
-usage() { echo "usage: $1" >&2; echo 'quote descriptions: "like this"' >&2; exit 1; }
 
 is_running() { [[ "$(tail -n 1 "$1" | cut -d, -f2)" == start ]]; }
 
-running() { # prints names whose last event is start
+name_of() { local n="${1#"$ledger"/}"; echo "${n%.csv}"; }
+
+running() { # prints client/project names whose last event is start
   local f
-  for f in "$ledger"/*.csv; do
-    [[ -f "$f" ]] && is_running "$f" && basename "$f" .csv
+  for f in "$ledger"/*/*.csv; do
+    [[ -f "$f" ]] && is_running "$f" && name_of "$f"
   done
   return 0
 }
@@ -63,19 +91,20 @@ balance() { # file -> minutes since last checkpoint, plus the checkpoint's carri
 case "${1:-status}" in
   start)
     shift
-    p=
-    if [[ "${1:-}" =~ $repo_re ]]; then p="$1"; shift; fi
-    (( $# <= 1 )) || usage 't start [owner/repo] ["description"]'
-    name="$(project "$p")"
-    for n in $(running); do log "$n" stop; echo "stopped $n"; done
-    log "$name" start "" "${1:-}"
+    (( $# <= 3 )) || usage 't start <client> <project> ["description"] [--at time]'
+    name="$(key "${1:-}" "${2:-}")"
+    names="$(running)"
+    for n in $names "$name"; do not_before_last "$n"; done
+    for n in $names; do log "$n" stop; echo "stopped $n"; done
+    log "$name" start "" "${3:-}"
     echo "started $name"
     ;;
   stop)
     shift
-    (( $# <= 1 )) || usage 't stop ["description"]'
+    (( $# <= 1 )) || usage 't stop ["description"] [--at time]'
     names="$(running)"
     [[ -n "$names" ]] || echo "no timer running"
+    for n in $names; do not_before_last "$n"; done
     for n in $names; do log "$n" stop "" "${1:-}"; echo "stopped $n"; done
     ;;
   status)
@@ -87,13 +116,13 @@ case "${1:-status}" in
     done
     ;;
   adjust)
-    [[ "${2:-}" =~ ^[+-]?[0-9]+(\.[0-9]+)?$ && -n "${3:-}" && $# -le 4 ]] && [[ -z "${4:-}" || "$4" =~ $repo_re ]] || usage 't adjust <±minutes> "reason" [owner/repo]'
-    name="$(project "${4:-}")"
-    log "$name" adjust "${2#+}" "$3"
-    echo "adjusted $name by $2 min"
+    [[ $# -eq 5 && "$4" =~ ^[+-]?[0-9]+(\.[0-9]+)?$ && -n "$5" ]] || usage 't adjust <client> <project> <±minutes> "reason"'
+    name="$(key "$2" "$3")"
+    log "$name" adjust "${4#+}" "$5"
+    echo "adjusted $name by $4 min"
     ;;
   checkpoint)
-    name="$(project "${2:-}")"
+    name="$(key "${2:-}" "${3:-}")"
     f="$ledger/$name.csv"
     [[ -f "$f" ]] || { echo "no ledger for $name" >&2; exit 1; }
     if is_running "$f"; then echo "$name is running; stop it first" >&2; exit 1; fi
@@ -102,10 +131,12 @@ case "${1:-status}" in
     echo "checkpoint $name at $m min"
     ;;
   report)
-    if [[ -n "${2:-}" ]]; then files=("$ledger/$(project "$2").csv"); else files=("$ledger"/*.csv); fi
+    if [[ -n "${3:-}" ]]; then files=("$ledger/$(key "$2" "$3").csv")
+    elif [[ -n "${2:-}" ]]; then files=("$ledger/$(part client "$2")"/*.csv)
+    else files=("$ledger"/*/*.csv); fi
     for f in "${files[@]}"; do
       [[ -f "$f" ]] || continue
-      printf "%-40s %8.2f h\n" "$(basename "$f" .csv)" "$(awk -v m="$(balance "$f")" 'BEGIN{print m/60}')"
+      printf "%-40s %8.2f h\n" "$(name_of "$f")" "$(awk -v m="$(balance "$f")" 'BEGIN{print m/60}')"
     done
     ;;
   *) sed -n '2,9p' "$0" | sed 's/^# //'; exit 1 ;;
